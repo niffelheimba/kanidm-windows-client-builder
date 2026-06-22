@@ -22,3 +22,7 @@ For an unattended installation, set the public MSI property directly:
 msiexec /i kanidm-windows-x86_64-v1.10.3.msi `
   KANIDM_URI=https://idm.northlake.dev
 ```
+
+Scheduled workflow runs skip Kanidm versions that already have a release. A
+manual **Run workflow** always rebuilds the latest version and replaces its
+existing ZIP, MSI, and checksum assets.
