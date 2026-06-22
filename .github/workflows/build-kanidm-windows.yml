@@ -1,0 +1,39 @@
+name: Build Kanidm for Windows
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: windows-2022
+
+    steps:
+      - name: Download Kanidm source
+        uses: actions/checkout@v4
+        with:
+          repository: kanidm/kanidm
+          ref: v1.10.3
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Build Kanidm CLI
+        run: cargo build --release --package kanidm_tools --bin kanidm
+
+      - name: Create ZIP package
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force package
+          Copy-Item target\release\kanidm.exe package\kanidm.exe
+          Compress-Archive `
+            -Path package\kanidm.exe `
+            -DestinationPath kanidm-windows-x86_64.zip
+
+      - name: Upload Windows client
+        uses: actions/upload-artifact@v4
+        with:
+          name: kanidm-windows-x86_64
+          path: kanidm-windows-x86_64.zip
