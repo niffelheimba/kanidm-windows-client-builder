@@ -57,19 +57,23 @@ jobs:
 
           if ($LASTEXITCODE -eq 0) {
             Write-Host "Release $env:KANIDM_TAG already exists. Nothing to build."
+
             "exists=true" | Out-File `
               -FilePath $env:GITHUB_OUTPUT `
               -Encoding utf8 `
               -Append
           }
           else {
-            Write-Host "Release $env:KANIDM_TAG does not exist yet."
+            Write-Host "Release $env:KANIDM_TAG does not exist yet. Continuing with build."
+
             "exists=false" | Out-File `
               -FilePath $env:GITHUB_OUTPUT `
               -Encoding utf8 `
               -Append
           }
 
+          # Prevent the expected gh exit code from failing this Actions step.
+          exit 0
       - name: Download Kanidm source
         if: steps.existing.outputs.exists == 'false'
         uses: actions/checkout@v4
