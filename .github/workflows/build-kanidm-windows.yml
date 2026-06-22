@@ -108,6 +108,8 @@ jobs:
         if: steps.existing.outputs.exists == 'false'
         working-directory: kanidm
         shell: pwsh
+        env:
+          KANIDM_CLIENT_CONFIG_PATH: C:\ProgramData\Kanidm\config
         run: |
           cargo build `
             --release `
@@ -164,7 +166,18 @@ jobs:
       - name: Install WiX Toolset
         if: steps.existing.outputs.exists == 'false'
         shell: pwsh
-        run: dotnet tool install wix --tool-path .wix --version 6.0.2
+        run: |
+          dotnet tool install wix --tool-path .wix --version 6.0.2
+          & .wix\wix.exe extension add --global WixToolset.UI.wixext/6.0.2
+
+      - name: Build installer custom actions
+        if: steps.existing.outputs.exists == 'false'
+        shell: pwsh
+        run: |
+          dotnet build builder\installer\CustomActions\KanidmCustomActions.csproj `
+            --configuration Release `
+            -p:Platform=x64 `
+            --output artifacts\custom-actions
 
       - name: Create MSI installer
         if: steps.existing.outputs.exists == 'false'
@@ -175,7 +188,9 @@ jobs:
         run: |
           & .wix\wix.exe build builder\installer\kanidm-client.wxs `
             -arch x64 `
+            -ext WixToolset.UI.wixext `
             -d ClientExe="$env:GITHUB_WORKSPACE\kanidm\target\release\kanidm.exe" `
+            -d CustomActionDll="$env:GITHUB_WORKSPACE\artifacts\custom-actions\KanidmCustomActions.CA.dll" `
             -d ProductVersion="$env:KANIDM_VERSION" `
             -o "artifacts\$env:PACKAGE_NAME.msi"
 

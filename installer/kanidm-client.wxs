@@ -5,12 +5,18 @@
     Manufacturer="Kanidm"
     Version="$(var.ProductVersion)"
     UpgradeCode="7E3BAF25-711A-4C07-8685-FD91121C1C16"
+    Language="1033"
     Scope="perMachine"
     Compressed="yes">
 
     <MajorUpgrade
       DowngradeErrorMessage="A newer version of the Kanidm Client Tools is already installed." />
     <MediaTemplate EmbedCab="yes" />
+
+    <Property
+      Id="KANIDM_URI"
+      Value="https://idm.northlake.dev"
+      Secure="yes" />
 
     <StandardDirectory Id="ProgramFiles64Folder">
       <Directory Id="INSTALLFOLDER" Name="Kanidm">
@@ -28,8 +34,168 @@
       </Directory>
     </StandardDirectory>
 
+    <StandardDirectory Id="CommonAppDataFolder">
+      <Directory Id="CONFIGFOLDER" Name="Kanidm">
+        <Component
+          Id="KanidmConfigDirectory"
+          Guid="6FCBA4A0-56EA-4405-8325-8E9331A6CB31">
+          <CreateFolder />
+          <RegistryValue
+            Root="HKLM"
+            Key="Software\Kanidm\Client Tools"
+            Name="ConfigDirectoryCreated"
+            Type="integer"
+            Value="1"
+            KeyPath="yes" />
+        </Component>
+      </Directory>
+    </StandardDirectory>
+
+    <Binary
+      Id="KanidmCustomActions"
+      SourceFile="$(var.CustomActionDll)" />
+
+    <CustomAction
+      Id="SetWriteKanidmConfigData"
+      Property="WriteKanidmConfig"
+      Value="ConfigPath=[CONFIGFOLDER]config;Uri=[KANIDM_URI]" />
+    <CustomAction
+      Id="WriteKanidmConfig"
+      BinaryRef="KanidmCustomActions"
+      DllEntry="WriteKanidmConfig"
+      Execute="deferred"
+      Impersonate="no"
+      Return="check" />
+
+    <InstallExecuteSequence>
+      <Custom
+        Action="SetWriteKanidmConfigData"
+        After="CreateFolders"
+        Condition="NOT Installed" />
+      <Custom
+        Action="WriteKanidmConfig"
+        After="SetWriteKanidmConfigData"
+        Condition="NOT Installed" />
+    </InstallExecuteSequence>
+
     <Feature Id="Complete" Title="Kanidm Client Tools" Level="1">
       <ComponentRef Id="KanidmClient" />
+      <ComponentRef Id="KanidmConfigDirectory" />
     </Feature>
+
+    <UI Id="KanidmUI">
+      <TextStyle Id="WixUI_Font_Normal" FaceName="Tahoma" Size="8" />
+      <TextStyle Id="WixUI_Font_Bigger" FaceName="Tahoma" Size="12" />
+      <TextStyle Id="WixUI_Font_Title" FaceName="Tahoma" Size="9" Bold="yes" />
+      <Property Id="DefaultUIFont" Value="WixUI_Font_Normal" />
+
+      <Dialog Id="KanidmConfigDlg" Width="370" Height="270" Title="Configure Kanidm">
+        <Control
+          Id="Title"
+          Type="Text"
+          X="15"
+          Y="6"
+          Width="300"
+          Height="15"
+          Transparent="yes"
+          NoPrefix="yes"
+          Text="Kanidm server configuration" />
+        <Control
+          Id="Description"
+          Type="Text"
+          X="25"
+          Y="23"
+          Width="320"
+          Height="20"
+          Transparent="yes"
+          NoPrefix="yes"
+          Text="Set the server URL used by the Kanidm command-line client." />
+        <Control Id="BannerLine" Type="Line" X="0" Y="44" Width="373" Height="0" />
+        <Control
+          Id="UriLabel"
+          Type="Text"
+          X="25"
+          Y="75"
+          Width="320"
+          Height="15"
+          Text="Kanidm server URL:" />
+        <Control
+          Id="UriEdit"
+          Type="Edit"
+          X="25"
+          Y="92"
+          Width="320"
+          Height="18"
+          Property="KANIDM_URI" />
+        <Control
+          Id="ConfigPath"
+          Type="Text"
+          X="25"
+          Y="125"
+          Width="320"
+          Height="30"
+          NoPrefix="yes"
+          Text="The system-wide configuration will be created at C:\ProgramData\Kanidm\config. Existing configuration is preserved." />
+        <Control Id="BottomLine" Type="Line" X="0" Y="234" Width="373" Height="0" />
+        <Control
+          Id="Back"
+          Type="PushButton"
+          X="180"
+          Y="243"
+          Width="56"
+          Height="17"
+          Text="Back" />
+        <Control
+          Id="Next"
+          Type="PushButton"
+          X="236"
+          Y="243"
+          Width="56"
+          Height="17"
+          Default="yes"
+          Text="Next" />
+        <Control
+          Id="Cancel"
+          Type="PushButton"
+          X="304"
+          Y="243"
+          Width="56"
+          Height="17"
+          Cancel="yes"
+          Text="Cancel">
+          <Publish Event="SpawnDialog" Value="CancelDlg" />
+        </Control>
+      </Dialog>
+
+      <DialogRef Id="ErrorDlg" />
+      <DialogRef Id="FatalError" />
+      <DialogRef Id="FilesInUse" />
+      <DialogRef Id="MsiRMFilesInUse" />
+      <DialogRef Id="PrepareDlg" />
+      <DialogRef Id="ProgressDlg" />
+      <DialogRef Id="ResumeDlg" />
+      <DialogRef Id="UserExit" />
+
+      <Publish Dialog="ExitDialog" Control="Finish" Event="EndDialog" Value="Return" Order="999" />
+
+      <Publish Dialog="WelcomeDlg" Control="Next" Event="NewDialog" Value="KanidmConfigDlg" Condition="NOT Installed" />
+      <Publish Dialog="WelcomeDlg" Control="Next" Event="NewDialog" Value="VerifyReadyDlg" Condition="Installed AND PATCH" />
+
+      <Publish Dialog="KanidmConfigDlg" Control="Back" Event="NewDialog" Value="WelcomeDlg" />
+      <Publish Dialog="KanidmConfigDlg" Control="Next" Event="NewDialog" Value="VerifyReadyDlg" Condition="KANIDM_URI &lt;&gt; &quot;&quot;" />
+
+      <Publish Dialog="VerifyReadyDlg" Control="Back" Event="NewDialog" Value="KanidmConfigDlg" Order="1" Condition="NOT Installed" />
+      <Publish Dialog="VerifyReadyDlg" Control="Back" Event="NewDialog" Value="MaintenanceTypeDlg" Order="2" Condition="Installed AND NOT PATCH" />
+      <Publish Dialog="VerifyReadyDlg" Control="Back" Event="NewDialog" Value="WelcomeDlg" Order="2" Condition="Installed AND PATCH" />
+
+      <Publish Dialog="MaintenanceWelcomeDlg" Control="Next" Event="NewDialog" Value="MaintenanceTypeDlg" />
+      <Publish Dialog="MaintenanceTypeDlg" Control="RepairButton" Event="NewDialog" Value="VerifyReadyDlg" />
+      <Publish Dialog="MaintenanceTypeDlg" Control="RemoveButton" Event="NewDialog" Value="VerifyReadyDlg" />
+      <Publish Dialog="MaintenanceTypeDlg" Control="Back" Event="NewDialog" Value="MaintenanceWelcomeDlg" />
+
+      <Property Id="ARPNOMODIFY" Value="1" />
+    </UI>
+
+    <UIRef Id="WixUI_Common" />
   </Package>
 </Wix>
