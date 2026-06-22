@@ -117,11 +117,36 @@ jobs:
         shell: pwsh
         env:
           KANIDM_CLIENT_CONFIG_PATH: C:\ProgramData\Kanidm\config
+          CARGO_NET_RETRY: "10"
+          CARGO_HTTP_TIMEOUT: "600"
+          CARGO_HTTP_MULTIPLEXING: "false"
         run: |
-          cargo build `
-            --release `
-            --package kanidm_tools `
-            --bin kanidm
+          $buildArguments = @(
+            "build"
+            "--locked"
+            "--release"
+            "--package"
+            "kanidm_tools"
+            "--bin"
+            "kanidm"
+          )
+
+          for ($attempt = 1; $attempt -le 3; $attempt++) {
+            Write-Host "Cargo build attempt $attempt of 3"
+            & cargo @buildArguments
+
+            if ($LASTEXITCODE -eq 0) {
+              break
+            }
+
+            if ($attempt -eq 3) {
+              throw "Cargo build failed after 3 attempts."
+            }
+
+            $delay = 15 * $attempt
+            Write-Warning "Cargo build failed. Retrying in $delay seconds."
+            Start-Sleep -Seconds $delay
+          }
 
       - name: Package portable Windows client
         if: steps.existing.outputs.build == 'true'
