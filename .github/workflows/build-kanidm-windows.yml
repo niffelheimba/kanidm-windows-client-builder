@@ -1,64 +1,234 @@
-name: Build Kanidm for Windows
+name: Build new Kanidm Windows releases
 
 on:
+  # Check Kanidm every 6 hours.
+  schedule:
+    - cron: "17 */6 * * *"
+
+  # Also allow you to run the check manually.
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write
 
-env:
-  KANIDM_VERSION: 1.10.3
+concurrency:
+  group: kanidm-windows-release
+  cancel-in-progress: false
 
 jobs:
-  build:
+  check-build-release:
     runs-on: windows-2022
 
     steps:
+      - name: Find latest Kanidm release
+        id: kanidm
+        shell: pwsh
+        run: |
+          $headers = @{
+            "Accept"     = "application/vnd.github+json"
+            "User-Agent" = "kanidm-windows-client-builder"
+          }
+
+          $release = Invoke-RestMethod `
+            -Uri "https://api.github.com/repos/kanidm/kanidm/releases/latest" `
+            -Headers $headers
+
+          $tag = $release.tag_name
+
+          if ([string]::IsNullOrWhiteSpace($tag)) {
+            throw "GitHub did not return a Kanidm release tag."
+          }
+
+          if ($tag -notmatch '^v?(\d+)\.(\d+)\.(\d+)') {
+            throw "Kanidm release tag '$tag' is not a supported version."
+          }
+
+          $version = "$($Matches[1]).$($Matches[2]).$($Matches[3])"
+
+          Write-Host "Latest Kanidm release is $tag"
+          "tag=$tag" | Out-File `
+            -FilePath $env:GITHUB_OUTPUT `
+            -Encoding utf8 `
+            -Append
+          "version=$version" | Out-File `
+            -FilePath $env:GITHUB_OUTPUT `
+            -Encoding utf8 `
+            -Append
+
+      - name: Check whether we already published it
+        id: existing
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          KANIDM_TAG: ${{ steps.kanidm.outputs.tag }}
+        run: |
+          gh release view $env:KANIDM_TAG `
+            --repo $env:GITHUB_REPOSITORY *> $null
+
+          if ($LASTEXITCODE -eq 0) {
+            Write-Host "Release $env:KANIDM_TAG already exists. Nothing to build."
+
+            "exists=true" | Out-File `
+              -FilePath $env:GITHUB_OUTPUT `
+              -Encoding utf8 `
+              -Append
+          }
+          else {
+            Write-Host "Release $env:KANIDM_TAG does not exist yet. Continuing with build."
+
+            "exists=false" | Out-File `
+              -FilePath $env:GITHUB_OUTPUT `
+              -Encoding utf8 `
+              -Append
+          }
+
+          # Prevent the expected gh exit code from failing this Actions step.
+          exit 0
+
       - name: Check out installer sources
+        if: steps.existing.outputs.exists == 'false'
         uses: actions/checkout@v4
         with:
           path: builder
 
       - name: Download Kanidm source
+        if: steps.existing.outputs.exists == 'false'
         uses: actions/checkout@v4
         with:
           repository: kanidm/kanidm
-          ref: v${{ env.KANIDM_VERSION }}
+          ref: ${{ steps.kanidm.outputs.tag }}
           path: kanidm
+          persist-credentials: false
 
       - name: Install Rust
+        if: steps.existing.outputs.exists == 'false'
         uses: dtolnay/rust-toolchain@stable
 
       - name: Build Kanidm CLI
+        if: steps.existing.outputs.exists == 'false'
         working-directory: kanidm
-        run: cargo build --release --package kanidm_tools --bin kanidm
-
-      - name: Create ZIP package
         shell: pwsh
         run: |
-          New-Item -ItemType Directory -Force artifacts\package
-          Copy-Item kanidm\target\release\kanidm.exe artifacts\package\kanidm.exe
+          cargo build `
+            --release `
+            --package kanidm_tools `
+            --bin kanidm
+
+      - name: Package portable Windows client
+        if: steps.existing.outputs.exists == 'false'
+        id: package
+        shell: pwsh
+        env:
+          KANIDM_TAG: ${{ steps.kanidm.outputs.tag }}
+        run: |
+          $packageName = "kanidm-windows-x86_64-$env:KANIDM_TAG"
+          $artifactDirectory = Join-Path $PWD "artifacts"
+          $packageDirectory = Join-Path $artifactDirectory "package"
+          $zipPath = Join-Path $artifactDirectory "$packageName.zip"
+
+          New-Item `
+            -ItemType Directory `
+            -Path $packageDirectory `
+            -Force | Out-Null
+
+          Copy-Item `
+            "kanidm\target\release\kanidm.exe" `
+            "$packageDirectory\kanidm.exe"
+
+          @"
+          Kanidm Windows CLI $env:KANIDM_TAG
+
+          This is an unofficial Windows build produced from the corresponding
+          upstream Kanidm release source:
+
+          https://github.com/kanidm/kanidm/releases/tag/$env:KANIDM_TAG
+
+          Run:
+            kanidm.exe --help
+
+          This repository is not affiliated with the Kanidm project.
+          "@ | Set-Content `
+            "$packageDirectory\README.txt" `
+            -Encoding utf8
+
           Compress-Archive `
-            -Path artifacts\package\kanidm.exe `
-            -DestinationPath artifacts\kanidm-windows-x86_64.zip
+            -Path "$packageDirectory\*" `
+            -DestinationPath $zipPath `
+            -Force
+
+          "package_name=$packageName" | Out-File `
+            -FilePath $env:GITHUB_OUTPUT `
+            -Encoding utf8 `
+            -Append
 
       - name: Install WiX Toolset
+        if: steps.existing.outputs.exists == 'false'
         shell: pwsh
         run: dotnet tool install wix --tool-path .wix --version 6.0.2
 
       - name: Create MSI installer
+        if: steps.existing.outputs.exists == 'false'
         shell: pwsh
+        env:
+          KANIDM_VERSION: ${{ steps.kanidm.outputs.version }}
+          PACKAGE_NAME: ${{ steps.package.outputs.package_name }}
         run: |
           & .wix\wix.exe build builder\installer\kanidm-client.wxs `
             -arch x64 `
             -d ClientExe="$env:GITHUB_WORKSPACE\kanidm\target\release\kanidm.exe" `
             -d ProductVersion="$env:KANIDM_VERSION" `
-            -o artifacts\kanidm-windows-x86_64.msi
+            -o "artifacts\$env:PACKAGE_NAME.msi"
 
-      - name: Upload Windows client
-        uses: actions/upload-artifact@v4
-        with:
-          name: kanidm-windows-x86_64
-          path: |
-            artifacts/kanidm-windows-x86_64.zip
-            artifacts/kanidm-windows-x86_64.msi
+      - name: Create checksums
+        if: steps.existing.outputs.exists == 'false'
+        shell: pwsh
+        env:
+          PACKAGE_NAME: ${{ steps.package.outputs.package_name }}
+        run: |
+          foreach ($extension in @("zip", "msi")) {
+            $artifactName = "$env:PACKAGE_NAME.$extension"
+            $artifactPath = Join-Path "artifacts" $artifactName
+            $hash = Get-FileHash `
+              -Path $artifactPath `
+              -Algorithm SHA256
+
+            "$($hash.Hash.ToLower())  $artifactName" |
+              Set-Content `
+                "$artifactPath.sha256" `
+                -Encoding ascii
+          }
+
+      - name: Create release in this repository
+        if: steps.existing.outputs.exists == 'false'
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          KANIDM_TAG: ${{ steps.kanidm.outputs.tag }}
+          PACKAGE_NAME: ${{ steps.package.outputs.package_name }}
+        run: |
+          $notes = @"
+          Unofficial native Windows build of the Kanidm CLI from upstream
+          Kanidm release **$env:KANIDM_TAG**.
+
+          Included:
+
+          - Portable ZIP archive
+          - MSI installer for ``C:\Program Files\Kanidm`` and the system ``PATH``
+          - SHA-256 checksums
+
+          Upstream source release:
+          https://github.com/kanidm/kanidm/releases/tag/$env:KANIDM_TAG
+
+          This build is provided independently and is not an official Kanidm
+          release. Verify and test it before relying on it for administrative
+          access.
+          "@
+
+          gh release create $env:KANIDM_TAG `
+            "artifacts\$env:PACKAGE_NAME.zip" `
+            "artifacts\$env:PACKAGE_NAME.zip.sha256" `
+            "artifacts\$env:PACKAGE_NAME.msi" `
+            "artifacts\$env:PACKAGE_NAME.msi.sha256" `
+            --repo $env:GITHUB_REPOSITORY `
+            --title "Kanidm Windows CLI $env:KANIDM_TAG" `
+            --notes $notes
