@@ -6,34 +6,59 @@ on:
 permissions:
   contents: read
 
+env:
+  KANIDM_VERSION: 1.10.3
+
 jobs:
   build:
     runs-on: windows-2022
 
     steps:
+      - name: Check out installer sources
+        uses: actions/checkout@v4
+        with:
+          path: builder
+
       - name: Download Kanidm source
         uses: actions/checkout@v4
         with:
           repository: kanidm/kanidm
-          ref: v1.10.3
+          ref: v${{ env.KANIDM_VERSION }}
+          path: kanidm
 
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
 
       - name: Build Kanidm CLI
+        working-directory: kanidm
         run: cargo build --release --package kanidm_tools --bin kanidm
 
       - name: Create ZIP package
         shell: pwsh
         run: |
-          New-Item -ItemType Directory -Force package
-          Copy-Item target\release\kanidm.exe package\kanidm.exe
+          New-Item -ItemType Directory -Force artifacts\package
+          Copy-Item kanidm\target\release\kanidm.exe artifacts\package\kanidm.exe
           Compress-Archive `
-            -Path package\kanidm.exe `
-            -DestinationPath kanidm-windows-x86_64.zip
+            -Path artifacts\package\kanidm.exe `
+            -DestinationPath artifacts\kanidm-windows-x86_64.zip
+
+      - name: Install WiX Toolset
+        shell: pwsh
+        run: dotnet tool install wix --tool-path .wix --version 6.0.2
+
+      - name: Create MSI installer
+        shell: pwsh
+        run: |
+          & .wix\wix.exe build builder\installer\kanidm-client.wxs `
+            -arch x64 `
+            -d ClientExe="$env:GITHUB_WORKSPACE\kanidm\target\release\kanidm.exe" `
+            -d ProductVersion="$env:KANIDM_VERSION" `
+            -o artifacts\kanidm-windows-x86_64.msi
 
       - name: Upload Windows client
         uses: actions/upload-artifact@v4
         with:
           name: kanidm-windows-x86_64
-          path: kanidm-windows-x86_64.zip
+          path: |
+            artifacts/kanidm-windows-x86_64.zip
+            artifacts/kanidm-windows-x86_64.msi
