@@ -116,11 +116,27 @@ jobs:
         working-directory: kanidm
         shell: pwsh
         env:
-          KANIDM_CLIENT_CONFIG_PATH: C:\ProgramData\Kanidm\config
+          KANIDM_BUILD_PROFILE: windows_client
           CARGO_NET_RETRY: "10"
           CARGO_HTTP_TIMEOUT: "600"
           CARGO_HTTP_MULTIPLEXING: "false"
         run: |
+          # Kanidm's profile build script generates KANIDM_CLIENT_CONFIG_PATH
+          # itself, so setting that variable directly is ineffective. Create a
+          # Windows-specific profile and select it for this build instead.
+          $profilePath = "libs\profiles\windows_client.toml"
+          $profile = Get-Content `
+            "libs\profiles\developer.toml" `
+            -Raw
+          $profile = $profile -replace `
+            '(?m)^client_config_path\s*=.*$', `
+            'client_config_path = "C:/ProgramData/Kanidm/config"'
+          Set-Content `
+            -Path $profilePath `
+            -Value $profile `
+            -Encoding utf8 `
+            -NoNewline
+
           $buildArguments = @(
             "build"
             "--locked"
@@ -146,6 +162,15 @@ jobs:
             $delay = 15 * $attempt
             Write-Warning "Cargo build failed. Retrying in $delay seconds."
             Start-Sleep -Seconds $delay
+          }
+
+          $expectedConfigPath = "C:/ProgramData/Kanidm/config"
+          $binaryBytes = [System.IO.File]::ReadAllBytes(
+            "target\release\kanidm.exe"
+          )
+          $binaryText = [System.Text.Encoding]::UTF8.GetString($binaryBytes)
+          if (-not $binaryText.Contains($expectedConfigPath)) {
+            throw "Kanidm was not built with the Windows client config path."
           }
 
       - name: Package portable Windows client
