@@ -94,13 +94,13 @@ jobs:
 
       - name: Check out installer sources
         if: steps.existing.outputs.build == 'true'
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           path: builder
 
       - name: Download Kanidm source
         if: steps.existing.outputs.build == 'true'
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           repository: kanidm/kanidm
           ref: ${{ steps.kanidm.outputs.tag }}
@@ -136,6 +136,14 @@ jobs:
             -Value $profile `
             -Encoding utf8 `
             -NoNewline
+
+          # Some upstream releases retain prerelease workspace versions in
+          # Cargo.lock. Refresh workspace entries while retaining locked
+          # registry dependencies, then keep --locked for compilation.
+          cargo update --workspace
+          if ($LASTEXITCODE -ne 0) {
+            throw "Failed to reconcile the upstream workspace lockfile."
+          }
 
           $buildArguments = @(
             "build"
